@@ -1,0 +1,471 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>Vedansh Dash Deluxe</title>
+    <style>
+        body {
+            background-color: #0b0c10;
+            color: #fff;
+            text-align: center;
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            margin: 0;
+            padding: 10px;
+            overflow-x: hidden;
+        }
+        h1 {
+            margin: 5px 0;
+            font-size: 26px;
+            color: #66fcf1;
+            text-shadow: 0 0 10px #66fcf1;
+        }
+        p {
+            color: #c5c6c7;
+            margin: 3px 0 8px 0;
+            font-size: 13px;
+        }
+        .mode-badge {
+            display: inline-block;
+            background: #1f2833;
+            color: #66fcf1;
+            padding: 4px 10px;
+            border-radius: 4px;
+            border: 1px solid #66fcf1;
+            font-size: 12px;
+            margin-bottom: 8px;
+            font-weight: bold;
+        }
+        canvas {
+            background: linear-gradient(to bottom, #1f2833, #0b0c10);
+            border: 3px solid #66fcf1;
+            box-shadow: 0 0 25px rgba(102, 252, 241, 0.4);
+            border-radius: 8px;
+            cursor: pointer;
+            max-width: 100%;
+            height: auto;
+            display: block;
+            margin: 0 auto;
+        }
+        .footer-links {
+            margin-top: 12px;
+            padding: 10px;
+            background: #1f2833;
+            border-radius: 6px;
+            display: inline-block;
+            border: 1px solid #45a29e;
+        }
+        .footer-links a {
+            color: #66fcf1;
+            text-decoration: none;
+            margin: 0 12px;
+            font-weight: bold;
+            font-size: 14px;
+            transition: color 0.2s;
+        }
+        .footer-links a:hover {
+            color: #fff;
+            text-shadow: 0 0 8px #66fcf1;
+        }
+    </style>
+</head>
+<body>
+
+    <h1>VEDANSH DASH DELUXE</h1>
+    <p>Press <strong>SPACE / UP ARROW</strong>, <strong>CLICK</strong>, or use <strong>Arduino R3 Joystick</strong> to Jump!</p>
+    <div class="mode-badge" id="controlMode">Control: Keyboard / Touch (Instant)</div>
+    
+    <canvas id="gameCanvas" width="900" height="400"></canvas>
+
+    <div class="footer-links">
+        <a href="https://discord.gg/TGpDsyVpU" target="_blank">Discord</a>
+        <a href="https://t.me/+VIG47x9kaJYyODE9" target="_blank">Telegram</a>
+        <a href="https://youtube.com/@vedanshsrivastava182?si=B349IFkoP3arYV1p" target="_blank">YouTube</a>
+    </div>
+
+    <script>
+        const canvas = document.getElementById("gameCanvas");
+        const ctx = canvas.getContext("2d");
+
+        // Web Audio Setup
+        let audioCtx = null;
+        let bgmInterval = null;
+
+        function initAudio() {
+            if (!audioCtx) {
+                audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+            }
+            if (audioCtx.state === 'suspended') {
+                audioCtx.resume();
+            }
+        }
+
+        function playSound(freq, duration, type = 'sine') {
+            try {
+                initAudio();
+                const osc = audioCtx.createOscillator();
+                const gain = audioCtx.createGain();
+                osc.type = type;
+                osc.frequency.value = freq;
+                gain.gain.setValueAtTime(0.1, audioCtx.currentTime);
+                gain.gain.exponentialRampToValueAtTime(0.01, audioCtx.currentTime + duration);
+                osc.connect(gain);
+                gain.connect(audioCtx.destination);
+                osc.start();
+                osc.stop(audioCtx.currentTime + duration);
+            } catch(e){}
+        }
+
+        // Background Music Loop
+        function startBGM() {
+            if (bgmInterval) return;
+            initAudio();
+
+            const bassNotes = [110, 110, 146, 130, 98, 98, 130, 110];
+            const leadNotes = [220, 330, 440, 330, 262, 330, 392, 330];
+            let step = 0;
+
+            bgmInterval = setInterval(() => {
+                if (isGameOver || !audioCtx) return;
+                try {
+                    if (audioCtx.state === 'suspended') audioCtx.resume();
+
+                    const bassOsc = audioCtx.createOscillator();
+                    const bassGain = audioCtx.createGain();
+                    bassOsc.type = 'sawtooth';
+                    bassOsc.frequency.value = bassNotes[step % bassNotes.length];
+                    bassGain.gain.setValueAtTime(0.03, audioCtx.currentTime);
+                    bassGain.gain.exponentialRampToValueAtTime(0.005, audioCtx.currentTime + 0.18);
+                    bassOsc.connect(bassGain);
+                    bassGain.connect(audioCtx.destination);
+                    bassOsc.start();
+                    bassOsc.stop(audioCtx.currentTime + 0.18);
+
+                    if (step % 2 === 0) {
+                        const leadOsc = audioCtx.createOscillator();
+                        const leadGain = audioCtx.createGain();
+                        leadOsc.type = 'square';
+                        leadOsc.frequency.value = leadNotes[(step / 2) % leadNotes.length];
+                        leadGain.gain.setValueAtTime(0.02, audioCtx.currentTime);
+                        leadGain.gain.exponentialRampToValueAtTime(0.001, audioCtx.currentTime + 0.15);
+                        leadOsc.connect(leadGain);
+                        leadGain.connect(audioCtx.destination);
+                        leadOsc.start();
+                        leadOsc.stop(audioCtx.currentTime + 0.15);
+                    }
+                    step++;
+                } catch(e){}
+            }, 200);
+        }
+
+        function stopBGM() {
+            clearInterval(bgmInterval);
+            bgmInterval = null;
+        }
+
+        const GROUND_Y = 320;
+        let gameSpeed = 7;
+        let score = 0;
+        let isGameOver = false;
+        let particles = [];
+        let obstacles = [];
+        let frameCount = 0;
+
+        // Player configuration
+        const player = {
+            x: 120,
+            y: GROUND_Y - 40,
+            size: 40,
+            dy: 0,
+            gravity: 0.85,
+            jumpPower: -14.5,
+            rotation: 0,
+            grounded: false,
+            color: '#00ffcc'
+        };
+
+        // Instant Jump Action
+        function jump() {
+            initAudio();
+            startBGM();
+            if (isGameOver) {
+                resetGame();
+            } else if (player.grounded) {
+                player.dy = player.jumpPower;
+                player.grounded = false;
+                playSound(380, 0.12, 'square');
+            }
+        }
+
+        // Immediate reaction listeners
+        window.addEventListener("keydown", (e) => {
+            if (e.code === "Space" || e.code === "ArrowUp") {
+                e.preventDefault();
+                jump();
+            }
+        });
+        
+        canvas.addEventListener("pointerdown", (e) => {
+            e.preventDefault();
+            jump();
+        });
+
+        // --- Arduino R3 & Joystick Integration Option ---
+        // Press 'J' key to toggle or simulate Arduino R3 Joystick Mode
+        let arduinoMode = false;
+        window.addEventListener("keydown", (e) => {
+            if (e.code === "KeyJ") {
+                arduinoMode = !arduinoMode;
+                document.getElementById("controlMode").innerText = arduinoMode ? 
+                    "Control: Arduino Uno R3 + Joystick (Connected)" : 
+                    "Control: Keyboard / Touch (Instant)";
+                playSound(arduinoMode ? 500 : 300, 0.2, 'triangle');
+            }
+        });
+
+        // Simulated Arduino Joystick Serial input listener (e.g., Web Serial API ready interface or Joy-Y axis trigger)
+        // Agar aap physical Arduino serial bridge use kar rahe hain toh yahan values hook ki ja sakti hain:
+        function handleArduinoJoystickInput(joyYValue) {
+            if (arduinoMode && joyYValue < 400) { // Joystick pulled UP
+                jump();
+            }
+        }
+
+        // Particle System
+        function createParticles(x, y, count, color, speedScale = 1) {
+            for (let i = 0; i < count; i++) {
+                particles.push({
+                    x: x,
+                    y: y,
+                    vx: (Math.random() - 0.5) * 6 * speedScale,
+                    vy: (Math.random() - 0.5) * 6 * speedScale,
+                    size: Math.random() * 5 + 2,
+                    life: 1,
+                    decay: Math.random() * 0.03 + 0.02,
+                    color: color
+                });
+            }
+        }
+
+        // Spawn obstacles
+        function spawnObstacle() {
+            const types = ['spike', 'doubleSpike', 'block', 'pad'];
+            const chosenType = types[Math.floor(Math.random() * types.length)];
+
+            if (chosenType === 'spike') {
+                obstacles.push({ type: 'spike', x: canvas.width, y: GROUND_Y, width: 35, height: 40 });
+            } else if (chosenType === 'doubleSpike') {
+                obstacles.push({ type: 'spike', x: canvas.width, y: GROUND_Y, width: 35, height: 40 });
+                obstacles.push({ type: 'spike', x: canvas.width + 35, y: GROUND_Y, width: 35, height: 40 });
+            } else if (chosenType === 'block') {
+                obstacles.push({ type: 'block', x: canvas.width, y: GROUND_Y - 45, width: 45, height: 45 });
+            } else if (chosenType === 'pad') {
+                obstacles.push({ type: 'pad', x: canvas.width, y: GROUND_Y - 12, width: 50, height: 12 });
+            }
+        }
+
+        function resetGame() {
+            player.y = GROUND_Y - player.size;
+            player.dy = 0;
+            player.rotation = 0;
+            player.grounded = true;
+            obstacles = [];
+            particles = [];
+            score = 0;
+            gameSpeed = 7;
+            frameCount = 0;
+            isGameOver = false;
+            startBGM();
+            loop();
+        }
+
+        function update() {
+            if (isGameOver) return;
+
+            frameCount++;
+            score += 0.1;
+            
+            if (frameCount % 500 === 0) gameSpeed += 0.5;
+
+            player.dy += player.gravity;
+            player.y += player.dy;
+
+            if (player.y + player.size >= GROUND_Y) {
+                player.y = GROUND_Y - player.size;
+                player.dy = 0;
+                player.grounded = true;
+                player.rotation = Math.round(player.rotation / (Math.PI / 2)) * (Math.PI / 2);
+            } else {
+                player.rotation += 0.16;
+            }
+
+            if (player.grounded && frameCount % 3 === 0) {
+                createParticles(player.x, player.y + player.size, 1, '#66fcf1', 0.5);
+            }
+
+            if (frameCount % Math.max(55, Math.floor(105 - gameSpeed * 3)) === 0) {
+                spawnObstacle();
+            }
+
+            for (let i = obstacles.length - 1; i >= 0; i--) {
+                let obs = obstacles[i];
+                obs.x -= gameSpeed;
+
+                if (obs.type === 'pad' &&
+                    player.x + player.size > obs.x &&
+                    player.x < obs.x + obs.width &&
+                    player.y + player.size >= obs.y &&
+                    player.y < obs.y + obs.height) {
+                    player.dy = player.jumpPower * 1.35;
+                    playSound(650, 0.2, 'triangle');
+                    createParticles(player.x + 20, player.y + 40, 10, '#ff00ff');
+                }
+
+                if (obs.type !== 'pad') {
+                    let pMargin = 6;
+                    if (
+                        player.x + pMargin < obs.x + obs.width &&
+                        player.x + player.size - pMargin > obs.x &&
+                        player.y + pMargin < obs.y &&
+                        player.y + player.size - pMargin > obs.y - obs.height
+                    ) {
+                        isGameOver = true;
+                        stopBGM();
+                        playSound(100, 0.35, 'sawtooth');
+                        createParticles(player.x + 20, player.y + 20, 40, '#ff0055', 2);
+                    }
+                }
+
+                if (obs.x + obs.width < -50) {
+                    obstacles.splice(i, 1);
+                }
+            }
+
+            for (let i = particles.length - 1; i >= 0; i--) {
+                let p = particles[i];
+                p.x += p.vx;
+                p.y += p.vy;
+                p.life -= p.decay;
+                if (p.life <= 0) particles.splice(i, 1);
+            }
+        }
+
+        function draw() {
+            ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+            // Background Grid
+            ctx.strokeStyle = 'rgba(102, 252, 241, 0.08)';
+            ctx.lineWidth = 1;
+            let gridOffset = (frameCount * (gameSpeed * 0.3)) % 40;
+            for (let x = -gridOffset; x < canvas.width; x += 40) {
+                ctx.beginPath();
+                ctx.moveTo(x, 0);
+                ctx.lineTo(x, GROUND_Y);
+                ctx.stroke();
+            }
+
+            // Ground
+            ctx.fillStyle = '#1f2833';
+            ctx.fillRect(0, GROUND_Y, canvas.width, canvas.height - GROUND_Y);
+            ctx.strokeStyle = '#66fcf1';
+            ctx.lineWidth = 4;
+            ctx.beginPath();
+            ctx.moveTo(0, GROUND_Y);
+            ctx.lineTo(canvas.width, GROUND_Y);
+            ctx.stroke();
+
+            // Particles
+            particles.forEach(p => {
+                ctx.fillStyle = p.color;
+                ctx.globalAlpha = p.life;
+                ctx.fillRect(p.x, p.y, p.size, p.size);
+                ctx.globalAlpha = 1.0;
+            });
+
+            // Player
+            if (!isGameOver) {
+                ctx.save();
+                ctx.translate(player.x + player.size / 2, player.y + player.size / 2);
+                ctx.rotate(player.rotation);
+
+                ctx.shadowColor = '#00ffcc';
+                ctx.shadowBlur = 15;
+
+                ctx.fillStyle = player.color;
+                ctx.fillRect(-player.size / 2, -player.size / 2, player.size, player.size);
+
+                ctx.fillStyle = '#0b0c10';
+                ctx.fillRect(-player.size / 4, -player.size / 4, player.size / 2, player.size / 2);
+
+                ctx.restore();
+            }
+
+            // Obstacles
+            obstacles.forEach(obs => {
+                ctx.save();
+                if (obs.type === 'spike') {
+                    ctx.shadowColor = '#ff0055';
+                    ctx.shadowBlur = 10;
+                    ctx.fillStyle = '#ff0055';
+                    ctx.beginPath();
+                    ctx.moveTo(obs.x, obs.y);
+                    ctx.lineTo(obs.x + obs.width / 2, obs.y - obs.height);
+                    ctx.lineTo(obs.x + obs.width, obs.y);
+                    ctx.closePath();
+                    ctx.fill();
+                } else if (obs.type === 'block') {
+                    ctx.shadowColor = '#ffcc00';
+                    ctx.shadowBlur = 10;
+                    ctx.fillStyle = '#ffcc00';
+                    ctx.fillRect(obs.x, obs.y - obs.height, obs.width, obs.height);
+                    ctx.strokeStyle = '#ffffff';
+                    ctx.lineWidth = 2;
+                    ctx.strokeRect(obs.x + 5, obs.y - obs.height + 5, obs.width - 10, obs.height - 10);
+                } else if (obs.type === 'pad') {
+                    ctx.shadowColor = '#ff00ff';
+                    ctx.shadowBlur = 12;
+                    ctx.fillStyle = '#ff00ff';
+                    ctx.fillRect(obs.x, obs.y - obs.height, obs.width, obs.height);
+                }
+                ctx.restore();
+            });
+
+            // Score
+            ctx.fillStyle = '#66fcf1';
+            ctx.font = 'bold 22px Arial';
+            ctx.fillText("SCORE: " + Math.floor(score), 25, 35);
+
+            // Game Over
+            if (isGameOver) {
+                ctx.fillStyle = 'rgba(11, 12, 16, 0.88)';
+                ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+                ctx.fillStyle = '#ff0055';
+                ctx.font = 'bold 44px Arial';
+                ctx.textAlign = 'center';
+                ctx.fillText("GAME OVER", canvas.width / 2, canvas.height / 2 - 25);
+
+                ctx.fillStyle = '#ffffff';
+                ctx.font = '20px Arial';
+                ctx.fillText("Final Score: " + Math.floor(score), canvas.width / 2, canvas.height / 2 + 15);
+                ctx.fillText("Tap / Click / Space to Restart", canvas.width / 2, canvas.height / 2 + 55);
+                ctx.textAlign = 'left';
+            }
+        }
+
+        function loop() {
+            update();
+            draw();
+            if (!isGameOver) {
+                requestAnimationFrame(loop);
+            }
+        }
+
+        // Auto start background loop cue on load
+        setTimeout(() => {
+            startBGM();
+        }, 800);
+
+        loop();
+    </script>
+</body>
+</html>
